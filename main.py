@@ -10,8 +10,8 @@ class ApplicationTracker:
         self.root.title("Job Application Tracker")
         self.create_database()
         self.create_widgets()
-        self.populate_treeview()
         self.create_visualization()
+        self.populate_treeview()
         self.configure_grid()
 
     def create_database(self):
@@ -134,9 +134,22 @@ class ApplicationTracker:
         self.search_frame.columnconfigure(1, weight=1)
         self.search_frame.columnconfigure(3, weight=1)
 
+        # Buttons Frame
+        self.buttons_frame = ttk.Frame(self.root)
+        self.buttons_frame.grid(row=2, column=0, columnspan=4, sticky='nsew', padx=5, pady=5)
+
+        # Add Application Button
+        tk.Button(self.buttons_frame, text="Add Application", command=self.add_application).grid(row=0, column=0, padx=5, pady=5)
+
+        # Update Status Button
+        tk.Button(self.buttons_frame, text="Update Status", command=self.update_status).grid(row=0, column=1, padx=5, pady=5)
+
+        # Delete Entry Button
+        tk.Button(self.buttons_frame, text="Delete Entry", command=self.delete_entry).grid(row=0, column=2, padx=5, pady=5)
+
         # Treeview for displaying applications
         self.tree_frame = ttk.Frame(self.root)
-        self.tree_frame.grid(row=2, column=0, columnspan=4, sticky='nsew', padx=5, pady=5)
+        self.tree_frame.grid(row=3, column=0, columnspan=4, sticky='nsew', padx=5, pady=5)
         self.tree_frame.rowconfigure(0, weight=1)
         self.tree_frame.columnconfigure(0, weight=1)
 
@@ -163,9 +176,10 @@ class ApplicationTracker:
 
         # Frame for matplotlib canvas
         self.canvas_frame = ttk.Frame(self.root)
-        self.canvas_frame.grid(row=3, column=0, columnspan=4, sticky='nsew', padx=5, pady=5)
+        self.canvas_frame.grid(row=4, column=0, columnspan=4, sticky='nsew', padx=5, pady=5)
         self.canvas_frame.rowconfigure(0, weight=1)
         self.canvas_frame.columnconfigure(0, weight=1)
+
 
     def ensure_exclusive_checks(self):
         # Ensure that 'Received Coding Challenge' and 'Received Interview' are exclusive
@@ -289,8 +303,106 @@ class ApplicationTracker:
                 self.cursor.execute('SELECT id, company, position, status, date_applied FROM applications')
             for row in self.cursor.fetchall():
                 self.tree.insert('', 'end', values=row)
+            # Update visualization based on current treeview data
+            self.update_visualization_with_treeview_data()
         except Exception as e:
             messagebox.showerror("Database Error", f"An error occurred: {e}")
+
+    def update_visualization_with_treeview_data(self):
+        # Collect data from the treeview instead of querying the database
+        tree_items = self.tree.get_children()
+        data = []
+        for item in tree_items:
+            values = self.tree.item(item, 'values')
+            app_id = values[0]
+            try:
+                self.cursor.execute('SELECT status, received_interview, received_coding_challenge FROM applications WHERE id=?', (app_id,))
+                row = self.cursor.fetchone()
+                data.append(row)
+            except Exception as e:
+                messagebox.showerror("Database Error", f"An error occurred: {e}")
+                return
+
+        # Proceed with the visualization using the collected data
+        # Initialize counts
+        status_counts = {
+            'No Answer': 0,
+            'Interviewing': 0,
+            'Offered': 0,
+            'Accepted': 0,
+            'Offer Rejected': 0,
+            'Rejected without Interview': 0,
+            'Rejected after Coding Challenge': 0,
+            'Rejected after Interview': 0
+        }
+
+        # Process data
+        for row in data:
+            status = row[0]
+            received_interview = row[1]
+            received_coding_challenge = row[2]
+
+            if status == 'Rejected':
+                if received_interview:
+                    status_counts['Rejected after Interview'] += 1
+                elif received_coding_challenge:
+                    status_counts['Rejected after Coding Challenge'] += 1
+                else:
+                    status_counts['Rejected without Interview'] += 1
+            else:
+                status_counts[status] += 1
+
+        # Prepare data for plotting
+        labels = []
+        counts = []
+        for status, count in status_counts.items():
+            if count > 0:
+                labels.append(status)
+                counts.append(count)
+
+        # Colors for statuses
+        color_map = {
+            'No Answer': 'lightgrey',
+            'Interviewing': 'gold',
+            'Offered': 'lightgreen',
+            'Accepted': 'blue',
+            'Offer Rejected': 'lightblue',
+            'Rejected without Interview': 'salmon',
+            'Rejected after Coding Challenge': 'orangered',
+            'Rejected after Interview': 'red'
+        }
+        colors = [color_map[status] for status in labels]
+
+        # Clear the previous plot
+        self.ax.clear()
+
+        if counts:
+            # Plot the data
+            wedges, texts, autotexts = self.ax.pie(
+                counts,
+                autopct='%1.1f%%',
+                startangle=140,
+                colors=colors
+            )
+            self.ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+            # Add legend
+            self.ax.legend(wedges, labels, title="Statuses", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+        else:
+            # Display a message when there is no data
+            self.ax.text(
+                0.5, 0.5,
+                'No Data Available',
+                horizontalalignment='center',
+                verticalalignment='center',
+                fontsize=16
+            )
+            self.ax.axis('off')
+
+        # Adjust layout to make room for legend
+        self.figure.tight_layout()
+
+        # Draw the canvas
+        self.canvas.draw()
 
     def search_entries(self):
         search_query = self.search_entry.get().strip()
@@ -441,8 +553,13 @@ class ApplicationTracker:
             self.ax.legend(wedges, labels, title="Statuses", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
         else:
             # Display a message when there is no data
-            self.ax.text(0.5, 0.5, 'No Data Available', horizontalalignment='center',
-                         verticalalignment='center', fontsize=16)
+            self.ax.text(
+                0.5, 0.5,
+                'No Data Available',
+                horizontalalignment='center',
+                verticalalignment='center',
+                fontsize=16
+            )
             self.ax.axis('off')
 
         # Adjust layout to make room for legend
@@ -453,8 +570,8 @@ class ApplicationTracker:
 
     def configure_grid(self):
         # Configure root grid weights
-        self.root.rowconfigure(2, weight=1)
-        self.root.rowconfigure(3, weight=1)
+        self.root.rowconfigure(3, weight=1)  # Treeview
+        self.root.rowconfigure(4, weight=1)  # Visualization
         self.root.columnconfigure(0, weight=1)
         self.root.columnconfigure(1, weight=1)
         self.root.columnconfigure(2, weight=1)
